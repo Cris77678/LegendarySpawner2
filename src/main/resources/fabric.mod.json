@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "id": "legendaryspawner",
+  "version": "${version}",
+  "name": "LegendarySpawner",
+  "description": "Sistema profesional de aparición de legendarios para servidores Cobblemon.",
+  "authors": ["TuNombre"],
+  "contact": {
+    "sources": "https://github.com/tuusuario/legendaryspawner"
+  },
+  "license": "MIT",
+  "icon": "assets/legendaryspawner/icon.png",
+  "environment": "server",
+  "entrypoints": {
+    "main": ["com.example.legendaryspawner.LegendarySpawnerMod"]
+  },
+  "mixins": [],
+  "depends": {
+    "fabricloader": ">=0.15.0",
+    "minecraft": "~1.21.1",
+    "java": ">=21",
+    "cobblemon": ">=1.7.3"
+  }
+}

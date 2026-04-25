@@ -1,0 +1,80 @@
+plugins {
+    id 'fabric-loom' version '1.7.4'
+    id 'maven-publish'
+}
+
+version = project.mod_version
+group = project.maven_group
+
+base {
+    archivesName = project.archives_base_name
+}
+
+repositories {
+    mavenCentral()
+    maven { url 'https://maven.fabricmc.net/' }
+
+    // Cobblemon
+    maven { url 'https://maven.cobblemon.com/releases' }
+
+    // Otros repos (opcionales, pero los dejamos por compatibilidad)
+    maven { url 'https://maven.impactdev.net/repository/development/' }
+    maven { url 'https://oss.sonatype.org/content/repositories/snapshots' }
+    maven { url 'https://maven.nucleoid.xyz' }
+}
+
+dependencies {
+    // Minecraft base
+    minecraft "com.mojang:minecraft:${project.minecraft_version}"
+    mappings "net.fabricmc:yarn:${project.yarn_mappings}:v2"
+    modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
+
+    // Fabric API
+    modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
+
+    // 🔥 Cobblemon (SIN dependencias masivas)
+    modImplementation("com.cobblemon:fabric:${project.cobblemon_version}") {
+        transitive = false
+    }
+
+    // 🔥 Kotlin SOLO para compilar (necesario por Cobblemon)
+    implementation "org.jetbrains.kotlin:kotlin-stdlib:2.3.21"
+
+    // Opcionales
+    compileOnly "net.luckperms:api:5.4"
+    compileOnly "com.google.code.gson:gson:2.10.1"
+}
+
+processResources {
+    inputs.property "version", project.version
+    filteringCharset "UTF-8"
+
+    filesMatching("fabric.mod.json") {
+        expand "version": project.version
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    it.options.release = 21
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+    withSourcesJar()
+}
+
+jar {
+    from("LICENSE") {
+        rename { "${it}_${project.base.archivesName.get()}" }
+    }
+}
+
+publishing {
+    publications {
+        create("mavenJava", MavenPublication) {
+            from components.java
+        }
+    }
+}
