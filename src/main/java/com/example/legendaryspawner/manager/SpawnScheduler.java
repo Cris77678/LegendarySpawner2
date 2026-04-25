@@ -5,10 +5,13 @@ import com.example.legendaryspawner.LegendarySpawnerMod;
 import com.example.legendaryspawner.config.LegendaryConfig;
 import com.example.legendaryspawner.util.MessageUtil;
 import com.example.legendaryspawner.webhook.DiscordWebhook;
+import net.minecraft.entity.boss.BossBar;
+import net.minecraft.entity.boss.ServerBossBar;
 import net.minecraft.registry.RegistryKey;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
+import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.biome.Biome;
 
@@ -23,6 +26,7 @@ public class SpawnScheduler {
     private final AuditLogger            auditLogger;
     private final Random                 rng = new Random();
 
+    // El timer ahora se usa para latir cada segundo
     private final ScheduledExecutorService timer =
             Executors.newSingleThreadScheduledExecutor(r -> {
                 Thread t = new Thread(r, "LegendarySpawner-Timer");
@@ -32,6 +36,10 @@ public class SpawnScheduler {
 
     private ScheduledFuture<?> currentTask;
     private volatile boolean   running = false;
+    
+    // Variables para la BossBar
+    private ServerBossBar bossBar;
+    private long nextSpawnTimeMs;
 
     public SpawnScheduler(MinecraftServer server, LegendaryConfig config,
                           ActiveLegendaryManager activeManager, AuditLogger auditLogger) {
@@ -49,29 +57,83 @@ public class SpawnScheduler {
 
     public void start() {
         running = true;
+        
+        // Inicializar la BossBar visual
+        bossBar = new ServerBossBar(Text.literal(""), BossBar.Color.YELLOW, BossBar.Style.PROGRESS);
+        
         scheduleNext();
-        LegendarySpawnerMod.LOGGER.info("[LegendarySpawner] Scheduler iniciado (intervalo: {} min).",
-                config.intervalMinutes);
+        
+        // Ejecutar un tick cada 1 segundo exacto
+        currentTask = timer.scheduleAtFixedRate(() -> {
+            if (running) {
+                server.execute(this::tickTimer);
+            }
+        }, 1, 1, TimeUnit.SECONDS);
+
+        LegendarySpawnerMod.LOGGER.info("[LegendarySpawner] Scheduler iniciado con BossBar visual.");
     }
 
     public void stop() {
         running = false;
         if (currentTask != null) currentTask.cancel(false);
+        if (bossBar != null) bossBar.clearPlayers();
         timer.shutdownNow();
         LegendarySpawnerMod.LOGGER.info("[LegendarySpawner] Scheduler detenido.");
     }
 
     public void reschedule() {
         if (currentTask != null) currentTask.cancel(false);
-        if (running) scheduleNext();
+        if (bossBar != null) bossBar.clearPlayers();
+        if (running) {
+            // Reiniciar el ciclo completo en lugar de solo reprogramar
+            scheduleNext();
+            currentTask = timer.scheduleAtFixedRate(() -> {
+                if (running) server.execute(this::tickTimer);
+            }, 1, 1, TimeUnit.SECONDS);
+        }
     }
 
     public void scheduleNext() {
-        long delay = config.intervalMinutes * 60L;
-        currentTask = timer.schedule(() -> {
-            server.execute(this::attemptSpawn);
-            if (running) scheduleNext();
-        }, delay, TimeUnit.SECONDS);
+        // Calcular el momento exacto en el futuro usando el intervalo de tu config.json
+        nextSpawnTimeMs = System.currentTimeMillis() + (config.intervalMinutes * 60_000L);
+    }
+
+    // ── Lógica de Tiempo y BossBar ────────────────────────────────────────────
+
+    private void tickTimer() {
+        long now = System.currentTimeMillis();
+        long remainingMs = nextSpawnTimeMs - now;
+
+        // Si el tiempo llegó a cero, intentar el spawn
+        if (remainingMs <= 0) {
+            attemptSpawn();
+            scheduleNext(); // Reiniciar el temporizador para el siguiente intento
+            return;
+        }
+
+        updateBossBar(remainingMs);
+    }
+
+    private void updateBossBar(long remainingMs) {
+        // Calcular formato mm:ss
+        int seconds = (int) (remainingMs / 1000) % 60;
+        int minutes = (int) (remainingMs / 60000);
+        String timeStr = String.format("%02d:%02d", minutes, seconds);
+
+        // Actualizar el texto
+        bossBar.setName(Text.literal("§6§lPróximo intento Legendario: §e" + timeStr));
+        
+        // Actualizar el porcentaje de llenado (de 1.0 a 0.0)
+        float progress = (float) remainingMs / (config.intervalMinutes * 60_000L);
+        bossBar.setPercent(Math.max(0.0f, Math.min(1.0f, progress)));
+
+        // Sincronizar jugadores (añadir a los que entren al servidor)
+        List<ServerPlayerEntity> onlinePlayers = server.getPlayerManager().getPlayerList();
+        for (ServerPlayerEntity p : onlinePlayers) {
+            if (!bossBar.getPlayers().contains(p)) {
+                bossBar.addPlayer(p);
+            }
+        }
     }
 
     // ── Lógica de spawn ───────────────────────────────────────────────────────
