@@ -15,15 +15,10 @@ import net.minecraft.world.biome.Biome;
 import java.util.*;
 import java.util.concurrent.*;
 
-/**
- * Controla el ciclo de aparición automática de legendarios.
- * El temporizador corre en un hilo separado; toda interacción con el mundo
- * se envía al hilo del servidor mediante {@code server.execute(...)}.
- */
 public class SpawnScheduler {
 
     private final MinecraftServer        server;
-    private final LegendaryConfig        config;
+    private LegendaryConfig              config;
     private final ActiveLegendaryManager activeManager;
     private final AuditLogger            auditLogger;
     private final Random                 rng = new Random();
@@ -46,6 +41,10 @@ public class SpawnScheduler {
         this.auditLogger   = auditLogger;
     }
 
+    public void setConfig(LegendaryConfig newConfig) {
+        this.config = newConfig;
+    }
+
     // ── Ciclo de vida ─────────────────────────────────────────────────────────
 
     public void start() {
@@ -62,33 +61,24 @@ public class SpawnScheduler {
         LegendarySpawnerMod.LOGGER.info("[LegendarySpawner] Scheduler detenido.");
     }
 
-    /** Cancela el ciclo actual y programa uno nuevo según la config actual. */
     public void reschedule() {
         if (currentTask != null) currentTask.cancel(false);
         if (running) scheduleNext();
     }
 
-    /** Programa la próxima ejecución. */
     public void scheduleNext() {
         long delay = config.intervalMinutes * 60L;
         currentTask = timer.schedule(() -> {
-            // Enviamos el intento de spawn al hilo del servidor
             server.execute(this::attemptSpawn);
-            // Tras ejecutarse, programar el siguiente ciclo
             if (running) scheduleNext();
         }, delay, TimeUnit.SECONDS);
     }
 
     // ── Lógica de spawn ───────────────────────────────────────────────────────
 
-    /**
-     * Intenta generar un legendario. Debe ejecutarse en el hilo del servidor.
-     */
     public void attemptSpawn() {
-        // Limpiar entidades muertas del mapa
         activeManager.cleanupDead();
 
-        // Verificar máximo de activos
         if (activeManager.getActiveCount() >= config.maxActiveLegendaries) {
             LegendarySpawnerMod.LOGGER.debug(
                     "[LegendarySpawner] Límite de activos alcanzado ({}/{}), skip.",
@@ -96,7 +86,6 @@ public class SpawnScheduler {
             return;
         }
 
-        // Verificar jugadores mínimos
         List<ServerPlayerEntity> players = server.getPlayerManager().getPlayerList();
         if (players.size() < config.minPlayers) {
             LegendarySpawnerMod.LOGGER.debug(
@@ -105,29 +94,21 @@ public class SpawnScheduler {
             return;
         }
 
-        // Chance
         if (rng.nextDouble() > config.spawnChance) {
             LegendarySpawnerMod.LOGGER.debug("[LegendarySpawner] Falló la probabilidad de spawn, skip.");
             return;
         }
 
-        // Elegir un jugador al azar como punto de referencia
         ServerPlayerEntity target = players.get(rng.nextInt(players.size()));
         performSpawnNearPlayer(target);
     }
 
-    /**
-     * Genera un legendario cerca del jugador dado.
-     * Se ejecuta en el hilo del servidor.
-     */
     public void performSpawnNearPlayer(ServerPlayerEntity player) {
         ServerWorld world = (ServerWorld) player.getWorld();
 
-        // Obtener bioma del jugador
         BlockPos playerPos = player.getBlockPos();
         String biomeId = getBiomeId(world, playerPos);
 
-        // Elegir legendario según bioma
         Optional<String> speciesOpt = pickLegendaryForPlayer(world, playerPos, biomeId);
         if (speciesOpt.isEmpty()) {
             LegendarySpawnerMod.LOGGER.debug(
@@ -136,7 +117,7 @@ public class SpawnScheduler {
         }
 
         String species     = speciesOpt.get();
-        String properties  = species + " level=" + (50 + rng.nextInt(50)); // nivel aleatorio 50-99
+        String properties  = species + " level=" + (50 + rng.nextInt(50));
 
         Optional<PokemonEntity> entityOpt =
                 SpawnHelper.spawnOnServerThread(world, player, properties, config.spawnRadius);
@@ -145,33 +126,23 @@ public class SpawnScheduler {
 
         PokemonEntity entity = entityOpt.get();
 
-        // Registrar en el manager
         activeManager.register(entity, biomeId);
 
-        // Efectos y anuncios
         applyEffects(world, entity.getBlockPos(), species, biomeId);
     }
 
     // ── Bioma y selección ─────────────────────────────────────────────────────
 
-    /**
-     * Devuelve el identificador del bioma en la posición dada.
-     */
     private String getBiomeId(ServerWorld world, BlockPos pos) {
         var biomeEntry = world.getBiome(pos);
         Optional<RegistryKey<Biome>> key = biomeEntry.getKey();
         return key.map(k -> k.getValue().toString()).orElse("unknown");
     }
 
-    /**
-     * Selecciona el legendario para el bioma.
-     * Si el bioma no está configurado, devuelve vacío (sin fallback).
-     */
     public Optional<String> pickLegendaryForPlayer(ServerWorld world, BlockPos pos, String biomeId) {
         List<String> pool = config.getLegendariesForBiome(biomeId);
         if (pool.isEmpty()) return Optional.empty();
 
-        // Filtrar blacklist
         List<String> valid = pool.stream()
                 .filter(s -> !config.isBlacklisted(s))
                 .toList();
@@ -183,16 +154,14 @@ public class SpawnScheduler {
     // ── Efectos y anuncios ────────────────────────────────────────────────────
 
     private void applyEffects(ServerWorld world, BlockPos spawnPos, String species, String biomeId) {
-        // Rayo cosmético
         if (config.lightningEffect) {
             net.minecraft.entity.LightningEntity bolt = new net.minecraft.entity.LightningEntity(
                     net.minecraft.entity.EntityType.LIGHTNING_BOLT, world);
-            bolt.setCosmetic(true); // sin daño
+            bolt.setCosmetic(true);
             bolt.setPosition(spawnPos.getX(), spawnPos.getY(), spawnPos.getZ());
             world.spawnEntity(bolt);
         }
 
-        // Sonido de Wither (global)
         if (config.witherSound) {
             for (ServerPlayerEntity p : server.getPlayerManager().getPlayerList()) {
                 p.getWorld().playSound(null, p.getBlockPos(),
@@ -201,9 +170,10 @@ public class SpawnScheduler {
             }
         }
 
-        // Anuncio al servidor
+        String cleanSpecies = species.split(" ")[0];
+
         String spawnMsg = config.messages.spawn
-                .replace("{pokemon}", capitalize(species))
+                .replace("{pokemon}", capitalize(cleanSpecies))
                 .replace("{biome}", biomeId)
                 .replace("{x}", String.valueOf(spawnPos.getX()))
                 .replace("{y}", String.valueOf(spawnPos.getY()))
@@ -214,9 +184,8 @@ public class SpawnScheduler {
                 String.format("Spawneado %s en bioma %s [%d, %d, %d]",
                         species, biomeId, spawnPos.getX(), spawnPos.getY(), spawnPos.getZ()));
 
-        // Discord
         if (config.discordEnabled && !config.discordWebhookUrl.isEmpty()) {
-            DiscordWebhook.sendSpawn(config.discordWebhookUrl, species, biomeId,
+            DiscordWebhook.sendSpawn(config.discordWebhookUrl, cleanSpecies, biomeId,
                     spawnPos.getX(), spawnPos.getY(), spawnPos.getZ());
         }
     }
