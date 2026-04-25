@@ -97,6 +97,10 @@ public final class DiscordWebhook {
             con.setRequestMethod("POST");
             con.setDoOutput(true);
             con.setRequestProperty("Content-Type", "application/json");
+            
+            // 👇 SOLUCIÓN: User-Agent añadido para evitar que Discord bloquee la petición
+            con.setRequestProperty("User-Agent", "LegendarySpawner-Mod/1.0");
+
             con.setConnectTimeout(5_000);
             con.setReadTimeout(5_000);
 
@@ -105,7 +109,9 @@ public final class DiscordWebhook {
             }
 
             int code = con.getResponseCode();
-            if (code < 200 || code >= 300) {
+            if (code == 429) {
+                LegendarySpawnerMod.LOGGER.warn("[LegendarySpawner] Discord Rate Limit excedido (Error 429). Demasiadas peticiones.");
+            } else if (code < 200 || code >= 300) {
                 LegendarySpawnerMod.LOGGER.warn(
                         "[LegendarySpawner] Discord webhook respondió con código {}", code);
             }
@@ -113,6 +119,13 @@ public final class DiscordWebhook {
         } catch (Exception e) {
             LegendarySpawnerMod.LOGGER.error("[LegendarySpawner] Error enviando webhook a Discord", e);
         }
+    }
+
+    /**
+     * Apaga el ejecutor de forma segura.
+     */
+    public static void shutdown() {
+        EXECUTOR.shutdown();
     }
 
     private static String capitalize(String s) {
