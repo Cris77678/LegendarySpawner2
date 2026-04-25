@@ -8,6 +8,7 @@ import com.example.legendaryspawner.config.LegendaryConfig;
 import com.example.legendaryspawner.manager.ActiveLegendaryManager;
 import com.example.legendaryspawner.manager.AuditLogger;
 import com.example.legendaryspawner.manager.SpawnScheduler;
+import com.example.legendaryspawner.webhook.DiscordWebhook;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
@@ -24,7 +25,6 @@ public class LegendarySpawnerMod implements ModInitializer {
     public static final String MOD_ID = "legendaryspawner";
     public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
 
-    /** Marca interna para identificar entidades spawneadas por este mod */
     public static final String SPAWNER_TAG = "legendaryspawner_id";
 
     private static final Set<UUID> spawnedByMod = ConcurrentHashMap.newKeySet();
@@ -58,6 +58,7 @@ public class LegendarySpawnerMod implements ModInitializer {
         ServerLifecycleEvents.SERVER_STOPPING.register(srv -> {
             if (scheduler != null) scheduler.stop();
             if (activeManager != null) activeManager.saveStateSync();
+            DiscordWebhook.shutdown(); // Apagado limpio del webhook
             spawnedByMod.clear();
             LOGGER.info("[LegendarySpawner] Mod detenido. Estado guardado.");
         });
@@ -68,12 +69,10 @@ public class LegendarySpawnerMod implements ModInitializer {
             PokemonEntity entity = event.getEntity();
             Pokemon pokemon = entity.getPokemon();
 
-            // Si fue spawneado por este mod, no lo bloquees
             if (wasSpawnedByMod(entity.getUuid())) {
                 return;
             }
 
-            // Bloquear spawns naturales de legendarios / míticos / ultra-beasts
             if (isLegendaryCategory(pokemon)) {
                 event.cancel();
                 LOGGER.debug("[LegendarySpawner] Spawn natural bloqueado: {}", pokemon.getSpecies().getName());
@@ -87,9 +86,6 @@ public class LegendarySpawnerMod implements ModInitializer {
         });
     }
 
-    /**
-     * Determina si un Pokémon pertenece a categoría legendaria según sus labels.
-     */
     public static boolean isLegendaryCategory(Pokemon pokemon) {
         var labels = pokemon.getSpecies().getLabels();
         return labels.contains("legendary")
@@ -121,7 +117,15 @@ public class LegendarySpawnerMod implements ModInitializer {
 
     public static void reloadConfig() {
         config = LegendaryConfig.loadOrCreate();
-        if (scheduler != null) scheduler.reschedule();
-        LOGGER.info("[LegendarySpawner] Configuración recargada.");
+        
+        if (activeManager != null) {
+            activeManager.setConfig(config);
+        }
+        if (scheduler != null) {
+            scheduler.setConfig(config);
+            scheduler.reschedule();
+        }
+        
+        LOGGER.info("[LegendarySpawner] Configuración recargada y aplicada al Scheduler.");
     }
 }
