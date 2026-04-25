@@ -96,9 +96,11 @@ public final class DiscordWebhook {
             HttpURLConnection con = (HttpURLConnection) url.openConnection();
             con.setRequestMethod("POST");
             con.setDoOutput(true);
+            
+            // Tipo de contenido JSON
             con.setRequestProperty("Content-Type", "application/json");
             
-            // 👇 SOLUCIÓN: User-Agent añadido para evitar que Discord bloquee la petición
+            // 👇 LA SOLUCIÓN: Identificarse ante Discord para evitar el bloqueo (Error 403)
             con.setRequestProperty("User-Agent", "LegendarySpawner-Mod/1.0");
 
             con.setConnectTimeout(5_000);
@@ -110,7 +112,7 @@ public final class DiscordWebhook {
 
             int code = con.getResponseCode();
             if (code == 429) {
-                LegendarySpawnerMod.LOGGER.warn("[LegendarySpawner] Discord Rate Limit excedido (Error 429). Demasiadas peticiones.");
+                LegendarySpawnerMod.LOGGER.warn("[LegendarySpawner] Discord Rate Limit excedido (Error 429). Demasiadas peticiones enviadas rápido.");
             } else if (code < 200 || code >= 300) {
                 LegendarySpawnerMod.LOGGER.warn(
                         "[LegendarySpawner] Discord webhook respondió con código {}", code);
@@ -122,7 +124,7 @@ public final class DiscordWebhook {
     }
 
     /**
-     * Apaga el ejecutor de forma segura.
+     * Apaga el ejecutor de forma segura al detener el servidor.
      */
     public static void shutdown() {
         EXECUTOR.shutdown();
